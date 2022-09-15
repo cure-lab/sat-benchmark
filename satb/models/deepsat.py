@@ -98,9 +98,7 @@ class DeepSAT(nn.Module):
             self.predictor = MLP(self.dim_hidden, self.dim_mlp, self.dim_pred, 
             num_layer=self.num_fc, norm_layer=self.norm_layer, act_layer=self.activation_layer, sigmoid=False, tanh=False)
 
-        
-
-    def forward(self, G):
+    def forward_features(self, G):
         num_nodes = G.num_nodes
         num_layers_f = max(G.forward_level).item() + 1
         num_layers_b = max(G.backward_level).item() + 1
@@ -121,13 +119,27 @@ class DeepSAT(nn.Module):
             h_false = None
 
         if 'lstm' in self.args.update_function:
-            preds = self._lstm_forward(G, h_init, num_layers_f, num_layers_b, num_nodes, h_true, h_false)
+            node_embedding = self._lstm_forward(G, h_init, num_layers_f, num_layers_b, num_nodes, h_true, h_false)
         elif 'gru' in self.args.update_function:
-            preds = self._gru_forward(G, h_init, num_layers_f, num_layers_b, h_true, h_false)
+            node_embedding = self._gru_forward(G, h_init, num_layers_f, num_layers_b, h_true, h_false)
         else:
             raise NotImplementedError('The update function should be specified as one of lstm and gru.')
         
-        return preds
+        return node_embedding
+
+    def forward_head(self, G, node_embedding):
+
+        if self.wx_mlp:
+            pred = self.predictor(torch.cat([node_embedding, x], dim=1))
+        else:
+            pred = self.predictor(node_embedding)
+
+        return pred
+
+    def forward(self, G):
+        node_embedding = self.forward_features(G)
+        pred = self.forward_head(G, node_embedding)
+        return pred
             
     
     def _lstm_forward(self, G, h_init, num_layers_f, num_layers_b, num_nodes, h_true=None, h_false=None):
@@ -189,12 +201,8 @@ class DeepSAT(nn.Module):
                
 
         node_embedding = node_state[0].squeeze(0)
-        if self.wx_mlp:
-            pred = self.predictor(torch.cat([node_embedding, x], dim=1))
-        else:
-            pred = self.predictor(node_embedding)
 
-        return pred
+        return node_embedding
     
     def _gru_forward(self, G, h_init, num_layers_f, num_layers_b, h_true=None, h_false=None):
         x, edge_index = G.x, G.edge_index
@@ -251,11 +259,7 @@ class DeepSAT(nn.Module):
 
         node_embedding = node_state.squeeze(0)
 
-        if self.wx_mlp:
-            pred = self.predictor(torch.cat([node_embedding, x], dim=1))
-        else:
-            pred = self.predictor(node_embedding)        
-        return pred
+        return node_embedding
 
     
     def imply_mask(self, G, h, h_true, h_false):
@@ -266,7 +270,226 @@ class DeepSAT(nn.Module):
         h_mask = h * normal_mask + h_true * true_mask + h_false * false_mask
         return h_mask
 
+    def decode_assignment(self, g):
+        # create dict_state
+        out = {}
+
+        # get the solution (assigned during data generation)
+        layer_mask = g.forward_level == 0
+        l_node = g.forward_index[layer_mask]
+        out['sol'] = g.y[l_node]
+
+        # set PO as 1.
+        layer_mask = g.backward_level == 0
+        l_node = g.backward_index[layer_mask]
+        g.mask[l_node] = torch.tensor(1.0)
+
+        # check # PIs
+        # literal index
+        layer_mask = g.forward_level == 0
+        l_node = g.forward_index[layer_mask]
+        print('# PIs: ', len(l_node))
 
 
-def get_deepsat_gnn(args):
-    return DeepSAT(args)
+        # for backtracking
+        ORDER = []
+        change_ind = -1
+        mask_backup = g.mask.clone().detach()
+
+
+        for i in range(len(l_node)):
+            print('==> # ', i+1, 'solving..')
+            output = self.forward(g).cpu()
+
+            # mask
+            one_mask = torch.zeros(g.y.size(0))
+            one_mask = one_mask.scatter(dim=0, index=l_node, src=torch.ones(len(l_node))).unsqueeze(1)
+            
+            max_val, max_ind = torch.max(output * one_mask, dim=0)
+            min_val, min_ind = torch.min(output + (1 - one_mask), dim=0)
+
+            ext_val, ext_ind = (max_val, max_ind) if (max_val > (1 - min_val)) else (min_val, min_ind)
+            # ext_val, ext_ind = torch.min(torch.abs(output * one_mask - 0.5), dim=0)
+            print('Assign No. ', ext_ind.item(), 'with prob: ', ext_val.item(), 'as value: ', 1.0 if ext_val > 0.5 else 0.0)
+            g.mask[ext_ind] = torch.tensor(1.0) if ext_val > 0.5 else torch.tensor(0.0)
+            # push the current index to Q
+            ORDER.append(ext_ind)
+            
+            l_node_new = []
+            for i in l_node:
+                if i != ext_ind:
+                    l_node_new.append(i)
+            l_node = torch.tensor(l_node_new)
+        
+
+
+        # literal index
+        layer_mask = g.forward_level == 0
+        l_node = g.forward_index[layer_mask]
+        print('Prob: ', output[l_node])
+        
+        sol = g.mask[l_node]
+        print('Solution: ', sol)
+        # check the satifiability
+        sat = self.pyg_simulation(g, sol)[0]
+        out['mask_0'] = sol
+        out['pred_0'] = output[l_node]
+        if sat:
+            torch.save(out, 'out/{}_s.pth'.format(g.name))
+            return sol, sat
+        
+        # index for saving
+        ith = 1
+        print('=====> Step into the backtracking...')
+        # do the backtracking
+        while ORDER:
+            # renew the mask
+            g.mask = mask_backup.clone().detach()
+            change_ind = ORDER.pop()
+            print('Change the values when solving No. ', change_ind.item(), 'PIs')
+            # literal index
+            layer_mask = g.forward_level == 0
+            l_node = g.forward_index[layer_mask]
+
+            for i in range(len(l_node)):
+                # print('==> # ', i+1, 'solving..')
+                output = self.forward(g).cpu()
+                # mask
+                one_mask = torch.zeros(g.y.size(0))
+                one_mask = one_mask.scatter(dim=0, index=l_node, src=torch.ones(len(l_node))).unsqueeze(1)
+                
+                max_val, max_ind = torch.max(output * one_mask, dim=0)
+                min_val, min_ind = torch.min(output + (1 - one_mask), dim=0)
+
+                ext_val, ext_ind = (max_val, max_ind) if (max_val > (1 - min_val)) else (min_val, min_ind)
+                # ext_val, ext_ind = torch.min(torch.abs(output * one_mask - 0.5), dim=0)
+                g.mask[ext_ind] = torch.tensor(1.0) if ext_val > 0.5 else torch.tensor(0.0)
+                # push the current index to Q
+                if ext_ind == change_ind:
+                    g.mask[ext_ind] = 1 - g.mask[ext_ind]
+                print('Assign No. ', ext_ind.item(), 'with prob: ', ext_val.item(), 'as value: ', g.mask[ext_ind].item())
+                
+                l_node_new = []
+                for i in l_node:
+                    if i != ext_ind:
+                        l_node_new.append(i)
+                l_node = torch.tensor(l_node_new)
+
+            # literal index
+            layer_mask = g.forward_level == 0
+            l_node = g.forward_index[layer_mask]
+            print('Prob: ', output[l_node])
+            
+            sol = g.mask[l_node]
+            # check the satifiability
+            sat = self.pyg_simulation(g, sol)[0]
+            print('Solution: ', sol)
+            out['mask_{}'.format(ith)] = sol
+            out['pred_{}'.format(ith)] = output[l_node]
+            ith += 1
+            if sat:
+                print('====> Hit the correct solution during the backtracking...')
+                torch.save(out, 'out/{}_s.pth'.format(g.name))
+                return sol, sat
+            else:
+                print('Wrong..')
+        
+        torch.save(out, 'out/{}_f.pth'.format(g.name))
+
+        return None, 0
+
+    def pyg_simulation(self, g, pattern=[]):
+        # PI, Level list
+        max_level = 0
+        PI_indexes = []
+        fanin_list = []
+        for idx, ele in enumerate(g.forward_level):
+            level = int(ele)
+            fanin_list.append([])
+            if level > max_level:
+                max_level = level
+            if level == 0:
+                PI_indexes.append(idx)
+        level_list = []
+        for level in range(max_level + 1):
+            level_list.append([])
+        for idx, ele in enumerate(g.forward_level):
+            level_list[int(ele)].append(idx)
+        # Fanin list 
+        for k in range(len(g.edge_index[0])):
+            src = g.edge_index[0][k]
+            dst = g.edge_index[1][k]
+            fanin_list[dst].append(src)
+        
+        ######################
+        # Simulation
+        ######################
+        y = [0] * len(g.x)
+        # if len(pattern) == 0:
+        #     pattern = random_pattern_generator(len(PI_indexes))
+        j = 0
+        for i in PI_indexes:
+            y[i] = pattern[j]
+            j = j + 1
+        for level in range(1, len(level_list), 1):
+            for node_idx in level_list[level]:
+                source_signals = []
+                for pre_idx in fanin_list[node_idx]:
+                    source_signals.append(y[pre_idx])
+                if len(source_signals) > 0:
+                    if int(g.x[node_idx][1]) == 1:
+                        gate_type = 1
+                    elif int(g.x[node_idx][2]) == 1:
+                        gate_type = 5
+                    else:
+                        raise("This is PI")
+                    y[node_idx] = self.logic(gate_type, source_signals)
+
+        # Output
+        if len(level_list[-1]) > 1:
+            raise('Too many POs')
+        return y[level_list[-1][0]], pattern
+
+    def logic(self, gate_type, signals):
+        if gate_type == 1:  # AND
+            for s in signals:
+                if s == 0:
+                    return 0
+            return 1
+
+        elif gate_type == 2:  # NAND
+            for s in signals:
+                if s == 0:
+                    return 1
+            return 0
+
+        elif gate_type == 3:  # OR
+            for s in signals:
+                if s == 1:
+                    return 1
+            return 0
+
+        elif gate_type == 4:  # NOR
+            for s in signals:
+                if s == 1:
+                    return 0
+            return 1
+
+        elif gate_type == 5:  # NOT
+            for s in signals:
+                if s == 1:
+                    return 0
+                else:
+                    return 1
+
+        elif gate_type == 6:  # XOR
+            z_count = 0
+            o_count = 0
+            for s in signals:
+                if s == 0:
+                    z_count = z_count + 1
+                elif s == 1:
+                    o_count = o_count + 1
+            if z_count == len(signals) or o_count == len(signals):
+                return 0
+            return 1

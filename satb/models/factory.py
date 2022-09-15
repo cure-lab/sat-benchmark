@@ -2,7 +2,7 @@ from urllib.parse import urlsplit, urlunsplit
 import os
 
 # from .registry import is_model, is_model_in_modules, model_entrypoint
-from .register_sat import is_model, model_entrypoint
+from .registry import is_model, model_entrypoint
 from .helpers import load_checkpoint
 # from .layers import set_layer_config
 # from .hub import load_model_config_from_hf
@@ -20,12 +20,12 @@ from .helpers import load_checkpoint
 #         return 'timm', model_name
 
 
-# def safe_model_name(model_name, remove_source=True):
-#     def make_safe(name):
-#         return ''.join(c if c.isalnum() else '_' for c in name).rstrip('_')
-#     if remove_source:
-#         model_name = parse_model_name(model_name)[-1]
-#     return make_safe(model_name)
+def safe_model_name(model_name, remove_source=True):
+    def make_safe(name):
+        return ''.join(c if c.isalnum() else '_' for c in name).rstrip('_')
+    # if remove_source:
+    #     model_name = parse_model_name(model_name)[-1]
+    return make_safe(model_name)
 
 
 def create_model(

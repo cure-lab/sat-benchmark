@@ -85,16 +85,35 @@ class NeuronSAT(nn.Module):
 
         # 3. predictor-related
         self.L_vote = MLP(self.dim_hidden, self.dim_hidden, self.dim_pred, num_layer=self.num_fc, p_drop=0.)
-
-    def forward(self, G):
+    
+    def forward_features(self, G, num_rounds=None):
         num_nodes = G.num_nodes
-        
-        preds = self._lstm_forward(G, num_nodes)
-        
-        return preds
+
+        node_state = self._lstm_forward(G, num_nodes, num_rounds)
+        return node_state
+
+    def forward_head(self, G, node_state):
+        num_nodes = G.num_nodes
+        x, edge_index = G.x, G.edge_index
+        l_mask = (x == 0)
+        l_index = torch.arange(0, G.x.size(0)).to(self.device)[l_mask.squeeze(1)]
+
+        logits = torch.index_select(node_state[0].squeeze(0), dim=0, index=l_index)  
+        vote = torch.zeros((num_nodes, 1)).to(self.device)
+        vote[l_index, :] = self.L_vote(logits)
+        vote_mean = scatter_sum(vote, G.batch, dim=0).squeeze(1) / (G.n_vars * 2)
+
+        return vote_mean
+
+
+    def forward(self, G, num_rounds=None):
+
+        node_state = self.forward_features(G, num_rounds)
+        pred = self.forward_head(G, node_state)
+        return pred
             
     
-    def _lstm_forward(self, G, num_nodes):
+    def _lstm_forward(self, G, num_nodes, num_rounds=None):
         x, edge_index = G.x, G.edge_index
 
         l_mask = (x == 0)
@@ -110,8 +129,9 @@ class NeuronSAT(nn.Module):
 
         node_state = (h_init, torch.zeros(1, num_nodes, self.dim_hidden).to(self.device)) # (h_0, c_0). here we only initialize h_0.
         
+        _num_rounds = num_rounds if num_rounds else self.num_rounds   
        
-        for _ in range(self.num_rounds):
+        for _ in range(_num_rounds):
             # forward layer
             c_state = (torch.index_select(node_state[0], dim=1, index=c_index), 
                         torch.index_select(node_state[1], dim=1, index=c_index))
@@ -137,13 +157,8 @@ class NeuronSAT(nn.Module):
             node_state[0][:, l_index, :] = l_state[0]
             node_state[1][:, l_index, :] = l_state[1]
 
-
-        logits = torch.index_select(node_state[0].squeeze(0), dim=0, index=l_index)  
-        vote = torch.zeros((num_nodes, 1)).to(self.device)
-        vote[l_index, :] = self.L_vote(logits)
-        vote_mean = scatter_sum(vote, G.batch, dim=0).squeeze(1) / (G.n_vars * 2)
-
-        return vote_mean
+        return node_state
+        
     
     def flip(self, G, state):
         offset = 0
@@ -161,6 +176,7 @@ class NeuronSAT(nn.Module):
         return flip_state
 
 
+    def decode_assignment(self, G, num_rounds=None):
+        # self.forward_features(G, num_rounds)
+        raise NotImplementedError
 
-def get_neurosat_gnn(args):
-    return NeuronSAT(args)

@@ -7,11 +7,11 @@ import os
 import torch
 
 from config import get_parse_args
-from utils.logger import Logger
-from utils.random_seed import set_seed
-from utils.sat_utils import solve_sat_iteratively
-from datasets.dataset_factory import dataset_factory
-from detectors.detector_factory import detector_factory
+# from utils.logger import Logger
+# from utils.random_seed import set_seed
+# from utils.sat_utils import solve_sat_iteratively
+from satb.data.dataset_factory import _dataset_factory
+# from detectors.detector_factory import detector_factory
 
 
 def test(args):
@@ -19,9 +19,8 @@ def test(args):
 
     print(args)
     args.num_rounds = args.test_num_rounds
-    Logger(args)
 
-    dataset = dataset_factory[args.dataset](args.data_dir, args)
+    dataset = _dataset_factory[args.dataset](args.dataset_dir, args)
     # Do the shuffle
     # perm = torch.randperm(len(dataset))
     # dataset = dataset[perm]
@@ -30,6 +29,7 @@ def test(args):
     data_len = len(dataset)
     print('Total # Test SAT problems: ', data_len)
 
+    exit()
 
     detector = detector_factory['base'](args)
 
@@ -53,6 +53,4 @@ def test(args):
 
 if __name__ == '__main__':
     args = get_parse_args()
-    set_seed(args)
-
     test(args)

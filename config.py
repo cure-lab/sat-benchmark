@@ -5,7 +5,7 @@ def get_parse_args():
     parser = argparse.ArgumentParser(description='Pytorch training script of DeepGate.')
 
     # basic experiment setting
-    parser.add_argument('task', default='prob', choices=['deepsat', 'neurosat', 'circuitsat'],
+    parser.add_argument('task', default='deepsat', choices=['deepsat', 'neurosat', 'circuitsat'],
                              help='deepsat | neurosat | circuitsat')
     parser.add_argument('--exp_id', default='default')
     parser.add_argument('--debug', type=int, default=0,
@@ -46,17 +46,11 @@ def get_parse_args():
 
 
     # dataset settings
-    parser.add_argument('--dataset', default='deepsat', type=str, choices=['deepsat', 'cnf', 'circuitsat'],
-                             metavar='NAME', help='target dataset')
-    parser.add_argument('--data_dir', default='../data/random_circuits',
-                             type=str, help='the path to the dataset')
     parser.add_argument('--test_data_dir', default=None,
                              type=str, help='the path to the testing dataset')
     # circuit
     parser.add_argument('--gate_types', default='*', type=str,
                              metavar='LIST', help='gate types in the circuits. For aig: INPUT,AND,NOT, For Circuit-sat: INPUT,AND,OR,NOT')
-    parser.add_argument('--dim_node_feature', default=8, 
-                             type=int, help='the dimension of node features')
     parser.add_argument('--dim_edge_feature', default=16,
                              type=int, help='the dimension of node features')
     parser.add_argument('--small_train', default=0, 
@@ -84,9 +78,6 @@ def get_parse_args():
 
 
     # model settings
-    parser.add_argument('--arch', default='deepsat', choices=['neurosat', 'circuitsat', 'deepsat'],
-                             help='model architecture. Currently support'
-                                  'neurosat | circuitsat | deepsat')
     parser.add_argument('--activation_layer', default='relu', type=str, choices=['relu', 'relu6', 'sigmoid'],
                              help='The activation function to use in the FC layers.')  
     parser.add_argument('--norm_layer', default='batchnorm', type=str,
@@ -182,6 +173,11 @@ def get_parse_args():
                              help='only show the comparision between C1 and simluated probability.')
     parser.add_argument('--test_num_rounds', default=10, type=int,
                              help='The number of rounds to be run during testing.')
+
+    #########################
+    # Dataset
+    #########################
+    parser.add_argument('--dataset_name', default='random_sr3_10_100', type=str)
     
     args = parser.parse_args()
 
@@ -192,7 +188,7 @@ def get_parse_args():
 
 
     # update data settings
-    DEFAULT_GATE_TO_INDEX = {"INPUT": 0, "AND": 1, "NAND": 2, "OR": 3, "NOR": 4, "NOT": 5, "XOR": 6}
+    DEFAULT_GATE_TO_INDEX = {"INPUT": 0, "AND": 1, "NOT": 2, "OR": 3, "NAND": 4, "NOR": 5, "XOR": 6}
     args.gate_to_index = {}
     if args.gate_types == '*':
         args.gate_to_index = DEFAULT_GATE_TO_INDEX
@@ -204,14 +200,14 @@ def get_parse_args():
 
     # check the relationship of `task`, `dataset` and `arch` comply with each other. TODO: optimize this part
     if args.task == 'deepsat':
-        assert args.dataset == 'deepsat', 'The dataset should be deepsat, if the task is deepsat.'
-        assert args.arch == 'deepsat', 'The architecture should be deepsat, if the task is either deepsat.'
+        args.dataset = 'deepsat'
+        args.arch = 'deepsat'
     elif args.task == 'neurosat':
-        assert args.dataset == 'cnf', 'The dataset should be cnf, if the task is neurosat.'
-        assert args.arch == 'neurosat', 'The architecture should be neurosat, if the task is neurosat.'
+        args.dataset = 'cnf'
+        args.arch = 'neurosat'
     else:
-        assert args.dataset == 'circuitsat', 'The dataset should be circuitsat, if the task is circuitsat.'
-        assert args.arch == 'circuitsat', 'The architecture should be circuitsat, if the task is circuitsat.'
+        args.dataset = 'circuitsat'
+        args.arch = 'circuitsat'
    
     
     if args.dataset == 'deepsat':
@@ -221,8 +217,6 @@ def get_parse_args():
     args.reverse = not args.no_reverse
 
 
-    assert args.dim_node_feature == (len(args.gate_to_index)), "The dimension of node feature is not consistent with the specification, please check it again." 
-
 
     if args.debug > 0:
         args.num_workers = 0
@@ -231,7 +225,8 @@ def get_parse_args():
 
 
     # dir
-    args.root_dir = os.path.join(os.path.dirname(__file__), '..')
+    args.root_dir = os.path.join(os.path.dirname(__file__))
+    args.dataset_dir = os.path.join(args.root_dir, 'data', args.dataset_name)
     args.exp_dir = os.path.join(args.root_dir, 'exp', args.task)
     args.save_dir = os.path.join(args.exp_dir, args.exp_id)
     args.debug_dir = os.path.join(args.save_dir, 'debug')

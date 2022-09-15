@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
-import copy
 from typing import Optional
 
 import torch
@@ -41,14 +36,14 @@ _update_function_factory = {
 
 
 
-class CircuitSAT(nn.Module):
+class DGDAGRNN(nn.Module):
     '''
-    Circuit-SAT.
+    DGDARRNN.
     The model used in this paper named Deep-Gated DAG Recursive Neural Networks (DG-DARGNN).
     https://openreview.net/forum?id=BJxgz2R9t7
     '''
     def __init__(self, args):
-        super(CircuitSAT, self).__init__()
+        super(DGDAGRNN, self).__init__()
 
         self.args = args
         self.use_aig = args.use_aig
@@ -99,15 +94,22 @@ class CircuitSAT(nn.Module):
         self.soft_evaluator = SoftEvaluator(temperature=self.temperature, use_aig=self.use_aig)
         self.hard_evaluator = HardEvaluator(use_aig=self.use_aig)
 
-       
 
-    def forward(self, G):
+    def forward_features(self, G, num_rounds=None):
         num_nodes = G.num_nodes
         num_layers_f = max(G.forward_level).item() + 1
         num_layers_b = max(G.backward_level).item() + 1
 
-        pred = self._gru_forward(G, num_layers_f, num_layers_b, num_nodes)
-        
+        node_embedding = self._gru_forward(G, num_layers_f, num_layers_b, num_nodes, num_rounds)
+        return node_embedding
+
+    def forward_head(self, node_embedding):
+        pred = self.literal_classifier(node_embedding)
+        return pred
+
+    def forward(self, G, num_rounds=None):
+        node_embedding = self.forward_features(G)
+        pred = self.forward_head(node_embedding)
         return pred
     
     def solve_and_evaluate(self, G):
@@ -116,12 +118,13 @@ class CircuitSAT(nn.Module):
 
         return sat
 
-    def _gru_forward(self, G, num_layers_f, num_layers_b, num_nodes):
+    def _gru_forward(self, G, num_layers_f, num_layers_b, num_nodes, num_rounds=None):
         # the solving procedure in circuitsat
         x, edge_index = G.x.clone().detach(), G.edge_index
         node_state = torch.zeros(1, num_nodes, self.dim_hidden).to(self.device) # (h_0). here we initialize h_0 as all zeros. TODO: option of  initializing the hidden state of GRU.
 
-        for round_idx in range(self.num_rounds):
+        _num_rounds = num_rounds if num_rounds else self.num_rounds
+        for round_idx in range(_num_rounds):
             if round_idx > 0:
                 x = self.projector(node_state.squeeze(0))
             for l_idx in range(1, num_layers_f):
@@ -153,11 +156,8 @@ class CircuitSAT(nn.Module):
 
 
         node_embedding = node_state.squeeze(0)
-        # literal 
-
-        pred = self.literal_classifier(node_embedding)
-
-        return pred
+        
+        return node_embedding
 
     
     def evaluate(self, G, pred):
@@ -206,6 +206,12 @@ class CircuitSAT(nn.Module):
     
     def hard_evaluate(self):
         raise NotImplementedError
+
+
+    def decode_assignment(self, g):
+        return self.forward(g)
+
+
     
         
 
@@ -296,4 +302,4 @@ class HardEvaluator(MessagePassing):
 
 
 def get_circuitsat_gnn(args):
-    return CircuitSAT(args)
+    return DGDAGRNN(args)
