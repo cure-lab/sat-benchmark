@@ -30,3 +30,11 @@ def accuracy(output, target, topk=(1,)):
     pred = pred.t()
     correct = pred.eq(target.reshape(1, -1).expand_as(pred))
     return [correct[:min(k, maxk)].reshape(-1).float().sum(0) * 100. / batch_size for k in topk]
+
+
+def accuracy_dgdagrnn(output):
+    """Computes the accuracy for dgdagrnn"""
+
+    pred = (output > 0.5).int()
+    return pred.sum(0) / pred.size(0)
+   

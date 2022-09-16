@@ -4,7 +4,7 @@ from __future__ import print_function
 
 import torch
 from torch import nn
-from utils.dag_utils import subgraph, custom_backward_subgraph
+# from utils.dag_utils import subgraph, custom_backward_subgraph
 
 from .gat_conv import AGNNConv
 from .gcn_conv import AggConv
@@ -30,6 +30,22 @@ _update_function_factory = {
     'layernorm_lstm': LayerNormLSTM,
     'layernorm_gru': LayerNormGRU,
 }
+
+def subgraph(target_idx, edge_index, edge_attr=None, dim=0):
+    '''
+    function from DAGNN
+    '''
+    le_idx = []
+    for n in target_idx:
+        ne_idx = edge_index[dim] == n
+        le_idx += [ne_idx.nonzero().squeeze(-1)]
+    le_idx = torch.cat(le_idx, dim=-1)
+    lp_edge_index = edge_index[:, le_idx]
+    if edge_attr is not None:
+        lp_edge_attr = edge_attr[le_idx, :]
+    else:
+        lp_edge_attr = None
+    return lp_edge_index, lp_edge_attr
 
 
 class DeepSAT(nn.Module):

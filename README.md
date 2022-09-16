@@ -49,15 +49,20 @@ Following list some features in my mind that should be realized in our codebase.
 
 ## Training examples
 
-### NeuroSAT
+### DeepSAT
 ```bash
-./distributed_train.sh 2 /imagenet/ --model efficientnet_b2 -b 128 --sched step --epochs 450 --decay-epochs 2.4 --decay-rate .97 --opt rmsproptf --opt-eps .001 -j 8 --warmup-lr 1e-6 --weight-decay 1e-5 --drop 0.3 --drop-path 0.2 --model-ema --model-ema-decay 0.9999 --aa rand-m9-mstd0.5 --remode pixel --reprob 0.2 --amp --lr .016
+sh distributed_train.sh 4 data/random_sr3_10_100/deepsat_dataset.npz --dataset gate --model deepsat -b 128 --sched step --epochs 100 --decay-epochs 2.4 --decay-rate .97 --opt rmsproptf --opt-eps .001 -j 8 --warmup-lr 1e-6 --weight-decay 1e-5 --amp --lr .016
 ```
+
+### DGDAGRNN
+```bash
+sh distributed_train.sh 4 data/random_sr3_10_100 --dataset ckt --model dgdagrnn -b 8 --sched step --epochs 100 --decay-epochs 2.4 --decay-rate .97 --opt rmsproptf --opt-eps .001 -j 8 --warmup-lr 1e-6 --weight-decay 1e-5 --amp --lr .016 --smooth-step-loss
+```
+
 
 
 ## TODO
 1. Consider the relationship between `timm` transformation (`timm.data.transforms`) and circuit transformation in EDA. We may consider the circuit transformation as one type of data augmentation and construct a comprehensive circuit transformation functionality (should be compatible  with TorchVision Transformation and Dataloader Structure). Current implementation processes SAT instances directly without any transforms.
 2. Enable gradient checking in all models.
 3. Transfer the circuit parser utility to `timm.data.parsers` style.
-4. Add `decode_assignment`
 

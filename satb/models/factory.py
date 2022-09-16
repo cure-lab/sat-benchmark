@@ -70,7 +70,8 @@ def create_model(
     create_fn = model_entrypoint(model_name)
     # with set_layer_config(scriptable=scriptable, exportable=exportable, no_jit=no_jit):
     #     model = create_fn(pretrained=pretrained, pretrained_cfg=pretrained_cfg, **kwargs)
-    model = create_fn(pretrained=pretrained, pretrained_cfg=pretrained_cfg, **kwargs)
+    # model = create_fn(pretrained=pretrained, pretrained_cfg=pretrained_cfg, **kwargs)
+    model = create_fn()
 
     if checkpoint_path:
         load_checkpoint(model, checkpoint_path)

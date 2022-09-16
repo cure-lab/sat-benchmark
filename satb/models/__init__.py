@@ -1,4 +1,4 @@
-from .factory import create_model, parse_model_name, safe_model_name
+from .factory import create_model, safe_model_name
 from .helpers import load_checkpoint, resume_checkpoint, model_parameters
 # from .layers import TestTimePoolHead, apply_test_time_pool
 # from .layers import convert_splitbn_model, convert_sync_batchnorm

@@ -52,7 +52,7 @@ from satb.models import create_model, safe_model_name, resume_checkpoint, \
     model_parameters
 from satb.optim import create_optimizer_v2, optimizer_kwargs
 from satb.scheduler import create_scheduler
-from satb.utils import ApexScaler, NativeScaler 
+from satb.utils import ApexScaler, NativeScaler, metrics 
 
 try:
     from apex import amp
@@ -101,21 +101,21 @@ parser.add_argument('data_dir', metavar='DIR',
                     help='path to dataset')
 group.add_argument('--dataset', '-d', metavar='NAME', default='',
                     help='dataset type (default: ImageFolder/ImageTar if empty)')
-group.add_argument('--train-split', metavar='NAME', default='train',
-                    help='dataset train split (default: train)')
-group.add_argument('--val-split', metavar='NAME', default='validation',
-                    help='dataset validation split (default: validation)')
-group.add_argument('--dataset-download', action='store_true', default=False,
-                    help='Allow download of dataset for torch/ and tfds/ datasets that support it.')
-group.add_argument('--class-map', default='', type=str, metavar='FILENAME',
-                    help='path to class to idx mapping file (default: "")')
+# group.add_argument('--train-split', metavar='NAME', default='train',
+#                     help='dataset train split (default: train)')
+# group.add_argument('--val-split', metavar='NAME', default='validation',
+#                     help='dataset validation split (default: validation)')
+# group.add_argument('--dataset-download', action='store_true', default=False,
+#                     help='Allow download of dataset for torch/ and tfds/ datasets that support it.')
+# group.add_argument('--class-map', default='', type=str, metavar='FILENAME',
+#                     help='path to class to idx mapping file (default: "")')
 group.add_argument('--trainval-split', default=0.9, type=float,
                     help='the splitting setting training dataset and validation dataset.')
 
 # Model parameters
 group = parser.add_argument_group('Model parameters')
 group.add_argument('--model', default='deepsat', type=str, metavar='MODEL',
-                    help='Name of model to train (default: "resnet50"')
+                    help='Name of model to train (default: "deepsat"')
 group.add_argument('--pretrained', action='store_true', default=False,
                     help='Start with pretrained version of specified network (if avail)')
 group.add_argument('--initial-checkpoint', default='', type=str, metavar='PATH',
@@ -341,10 +341,10 @@ group.add_argument('--output', default='', type=str, metavar='PATH',
                     help='path to output folder (default: none, current dir)')
 group.add_argument('--experiment', default='', type=str, metavar='NAME',
                     help='name of train experiment, name of sub-folder for output')
-group.add_argument('--eval-metric', default='top1', type=str, metavar='EVAL_METRIC',
-                    help='Best metric (default: "top1"')
-group.add_argument('--tta', type=int, default=0, metavar='N',
-                    help='Test/inference time augmentation (oversampling) factor. 0=None (default: 0)')
+group.add_argument('--eval-metric', default='acc', type=str, metavar='EVAL_METRIC',
+                    help='Best metric (default: "acc"')
+# group.add_argument('--tta', type=int, default=0, metavar='N',
+#                     help='Test/inference time augmentation (oversampling) factor. 0=None (default: 0)')
 group.add_argument("--local_rank", default=0, type=int)
 # group.add_argument('--use-multi-epochs-loader', action='store_true', default=False,
 #                     help='use the multi-epochs-loader to save time at the beginning of every epoch')
@@ -570,11 +570,11 @@ def main():
     #     batch_size=args.batch_size)
 
     dataset_train, dataset_eval = create_dataset(
-        args.dataset, root=args.data_dir, split=args.trainval_split, is_training=True,
+        args.dataset, root=args.data_dir, split=args.trainval_split) #, is_training=True,
         # class_map=args.class_map,
         # download=args.dataset_download,
-        batch_size=args.batch_size,
-        repeats=args.epoch_repeats)
+        # batch_size=args.batch_size,
+        # repeats=args.epoch_repeats)
 
     # setup mixup / cutmix
     collate_fn = None
@@ -695,7 +695,8 @@ def main():
         output_dir = utils.get_outdir(args.output if args.output else './output/train', exp_name)
         decreasing = True if eval_metric == 'loss' else False
         saver = utils.CheckpointSaver(
-            model=model, optimizer=optimizer, args=args, model_ema=model_ema, amp_scaler=loss_scaler,
+            model=model, optimizer=optimizer, args=args, #model_ema=model_ema, 
+            amp_scaler=loss_scaler,
             checkpoint_dir=output_dir, recovery_dir=output_dir, decreasing=decreasing, max_history=args.checkpoint_hist)
         with open(os.path.join(output_dir, 'args.yaml'), 'w') as f:
             f.write(args_text)
@@ -708,12 +709,12 @@ def main():
             train_metrics = train_one_epoch(
                 epoch, model, loader_train, optimizer, train_loss_fn, args,
                 lr_scheduler=lr_scheduler, saver=saver, output_dir=output_dir,
-                amp_autocast=amp_autocast, loss_scaler=loss_scaler, model_ema=model_ema, mixup_fn=mixup_fn)
+                amp_autocast=amp_autocast, loss_scaler=loss_scaler)#, model_ema=model_ema, mixup_fn=mixup_fn)
 
-            if args.distributed and args.dist_bn in ('broadcast', 'reduce'):
-                if args.local_rank == 0:
-                    _logger.info("Distributing BatchNorm running means and vars")
-                utils.distribute_bn(model, args.world_size, args.dist_bn == 'reduce')
+            # if args.distributed and args.dist_bn in ('broadcast', 'reduce'):
+            #     if args.local_rank == 0:
+            #         _logger.info("Distributing BatchNorm running means and vars")
+            #     utils.distribute_bn(model, args.world_size, args.dist_bn == 'reduce')
 
             eval_metrics = validate(model, loader_eval, validate_loss_fn, args, amp_autocast=amp_autocast)
 
@@ -765,19 +766,23 @@ def train_one_epoch(
     end = time.time()
     last_idx = len(loader) - 1
     num_updates = epoch * len(loader)
-    for batch_idx, (input, target) in enumerate(loader):
+    for batch_idx, input in enumerate(loader):
         last_batch = batch_idx == last_idx
         data_time_m.update(time.time() - end)
-        if not args.prefetcher:
-            input, target = input.cuda(), target.cuda()
+        # if not args.prefetcher:
+        input = input.cuda()
+        # input, target = input.cuda(), target.cuda()
             # if mixup_fn is not None:
             #     input, target = mixup_fn(input, target)
         if args.channels_last:
             input = input.contiguous(memory_format=torch.channels_last)
 
         with amp_autocast():
-            output = model(input)
-            loss = loss_fn(output, target)
+
+            # output = model(input)
+            # loss = loss_fn(output, target)
+            outputs = model(input)
+            loss = loss_fn(outputs).mean()
 
         if not args.distributed:
             losses_m.update(loss.item(), input.size(0))
@@ -855,19 +860,20 @@ def train_one_epoch(
 def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix=''):
     batch_time_m = utils.AverageMeter()
     losses_m = utils.AverageMeter()
-    top1_m = utils.AverageMeter()
-    top5_m = utils.AverageMeter()
+    # top1_m = utils.AverageMeter()
+    # top5_m = utils.AverageMeter()
+    acc_m = utils.AverageMeter()
 
     model.eval()
 
     end = time.time()
     last_idx = len(loader) - 1
     with torch.no_grad():
-        for batch_idx, (input, target) in enumerate(loader):
+        for batch_idx, input in enumerate(loader):
             last_batch = batch_idx == last_idx
-            if not args.prefetcher:
-                input = input.cuda()
-                target = target.cuda()
+            # if not args.prefetcher:
+            input = input.cuda()
+                # target = target.cuda()
             if args.channels_last:
                 input = input.contiguous(memory_format=torch.channels_last)
 
@@ -877,27 +883,31 @@ def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix='')
                 output = output[0]
 
             # augmentation reduction
-            reduce_factor = args.tta
-            if reduce_factor > 1:
-                output = output.unfold(0, reduce_factor, reduce_factor).mean(dim=2)
-                target = target[0:target.size(0):reduce_factor]
+            # reduce_factor = args.tta
+            # if reduce_factor > 1:
+            #     output = output.unfold(0, reduce_factor, reduce_factor).mean(dim=2)
+            #     target = target[0:target.size(0):reduce_factor]
 
-            loss = loss_fn(output, target)
+            # loss = loss_fn(output, target)
+            loss = loss_fn(output).mean()
             # FIXME: change the evaluation metric here.
-            acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+            # acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+            acc = utils.accuracy_dgdagrnn(output)
 
             if args.distributed:
                 reduced_loss = utils.reduce_tensor(loss.data, args.world_size)
-                acc1 = utils.reduce_tensor(acc1, args.world_size)
-                acc5 = utils.reduce_tensor(acc5, args.world_size)
+                # acc1 = utils.reduce_tensor(acc1, args.world_size)
+                # acc5 = utils.reduce_tensor(acc5, args.world_size)
+                acc = utils.reduce_tensor(acc, args.world_size)
             else:
                 reduced_loss = loss.data
 
             torch.cuda.synchronize()
 
             losses_m.update(reduced_loss.item(), input.size(0))
-            top1_m.update(acc1.item(), output.size(0))
-            top5_m.update(acc5.item(), output.size(0))
+            # top1_m.update(acc1.item(), output.size(0))
+            # top5_m.update(acc5.item(), output.size(0))
+            acc_m.update(acc.item(), output.size(0))
 
             batch_time_m.update(time.time() - end)
             end = time.time()
@@ -907,12 +917,14 @@ def validate(model, loader, loss_fn, args, amp_autocast=suppress, log_suffix='')
                     '{0}: [{1:>4d}/{2}]  '
                     'Time: {batch_time.val:.3f} ({batch_time.avg:.3f})  '
                     'Loss: {loss.val:>7.4f} ({loss.avg:>6.4f})  '
-                    'Acc@1: {top1.val:>7.4f} ({top1.avg:>7.4f})  '
-                    'Acc@5: {top5.val:>7.4f} ({top5.avg:>7.4f})'.format(
+                    # 'Acc@1: {top1.val:>7.4f} ({top1.avg:>7.4f})  '
+                    'Acc: {acc.val:>7.4f} ({acc.avg:>7.4f})'.format(
+                    # 'Acc@5: {top5.val:>7.4f} ({top5.avg:>7.4f})'.format(
                         log_name, batch_idx, last_idx, batch_time=batch_time_m,
-                        loss=losses_m, top1=top1_m, top5=top5_m))
+                        loss=losses_m, acc=acc_m))#top1=top1_m, top5=top5_m))
 
-    metrics = OrderedDict([('loss', losses_m.avg), ('top1', top1_m.avg), ('top5', top5_m.avg)])
+    # metrics = OrderedDict([('loss', losses_m.avg), ('top1', top1_m.avg), ('top5', top5_m.avg)])
+    metrics = OrderedDict([('loss', losses_m.avg), ('acc', acc_m.avg)])
 
     return metrics
 

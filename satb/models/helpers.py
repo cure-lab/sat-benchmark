@@ -17,11 +17,11 @@ import torch.nn as nn
 from torch.hub import load_state_dict_from_url
 from torch.utils.checkpoint import checkpoint
 
-from .features import FeatureListNet, FeatureDictNet, FeatureHookNet
-from .fx_features import FeatureGraphNet
-from .hub import has_hf_hub, download_cached_file, load_state_dict_from_hf
-from .layers import Conv2dSame, Linear, BatchNormAct2d
-from .registry import get_pretrained_cfg
+# from .features import FeatureListNet, FeatureDictNet, FeatureHookNet
+# from .fx_features import FeatureGraphNet
+# from .hub import has_hf_hub, download_cached_file, load_state_dict_from_hf
+# from .layers import Conv2dSame, Linear, BatchNormAct2d
+# from .registry import get_pretrained_cfg
 
 
 _logger = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ def resume_checkpoint(model, checkpoint_path, optimizer=None, loss_scaler=None, 
         _logger.error("No checkpoint found at '{}'".format(checkpoint_path))
         raise FileNotFoundError()
 
-
+'''
 def _resolve_pretrained_source(pretrained_cfg):
     cfg_source = pretrained_cfg.get('source', '')
     pretrained_url = pretrained_cfg.get('url', None)
@@ -569,7 +569,7 @@ def build_model_with_cfg(
     
     return model
 
-
+'''
 def model_parameters(model, exclude_head=False):
     if exclude_head:
         # FIXME this a bit of a quick and dirty hack to skip classifier head params based on ordering
@@ -577,7 +577,7 @@ def model_parameters(model, exclude_head=False):
     else:
         return model.parameters()
 
-
+'''
 def named_apply(fn: Callable, module: nn.Module, name='', depth_first=True, include_root=False) -> nn.Module:
     if not depth_first and include_root:
         fn(module=module, name=name)
@@ -788,3 +788,4 @@ def flatten_modules(named_modules, depth=1, prefix='', module_types='sequential'
                 if prefix:
                     name = '.'.join([prefix, name])
                 yield name, module
+'''

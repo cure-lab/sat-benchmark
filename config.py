@@ -72,6 +72,8 @@ def get_parse_args():
     # deepsat
     parser.add_argument('--use_aig', action='store_true', 
                              help='whether to use AIG.')
+    parser.add_argument('--no_aigopt', action='store_true', 
+                             help='whether to disable AIG optimization.')
     
 
 
@@ -200,20 +202,15 @@ def get_parse_args():
 
     # check the relationship of `task`, `dataset` and `arch` comply with each other. TODO: optimize this part
     if args.task == 'deepsat':
-        args.dataset = 'deepsat'
+        args.dataset = 'gate'
         args.arch = 'deepsat'
     elif args.task == 'neurosat':
         args.dataset = 'cnf'
         args.arch = 'neurosat'
     else:
-        args.dataset = 'circuitsat'
+        args.dataset = 'ckt'
         args.arch = 'circuitsat'
    
-    
-    if args.dataset == 'deepsat':
-        args.circuit_file = "sat_circuits_graphs.npz"
-        args.label_file = "sat_circuits_labels.npz"
-
     args.reverse = not args.no_reverse
 
 

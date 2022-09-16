@@ -5,7 +5,7 @@ Modified by Lee Man.
 NOTE: set up registry manully.
 """
 
-from .circuitsat import DGDAGRNN
+from .dgdagrnn import DGDAGRNN
 from .neurosat import NeuronSAT
 from .deepsat import DeepSAT
 
